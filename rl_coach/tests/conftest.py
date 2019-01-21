@@ -13,16 +13,19 @@
 # License.
 """PyTest configuration."""
 
-import configparser as ConfigParser
+import configparser as cfgparser
 import os
 import platform
+import shutil
 import pytest
+import rl_coach.tests.utils.presets_utils as p_utils
+from os import path
 
 
 def pytest_collection_modifyitems(config, items):
     """pytest built in method to pre-process cli options"""
     global test_config
-    test_config = ConfigParser.ConfigParser()
+    test_config = cfgparser.ConfigParser()
     str_rootdir = str(config.rootdir)
     str_inifile = str(config.inifile)
     # Get the relative path of the inifile
@@ -42,4 +45,26 @@ def pytest_runtest_setup(item):
     if item.get_marker("linux_only"):
         if platform.system() == 'Windows':
             pytest.skip("Skipping test that not Linux OS.")
+
+    if item.get_marker("golden_test"):
+        """ do some custom configuration for golden tests. """
+        # TODO: add custom functionality
+        pass
+
+
+@pytest.fixture(scope="module", params=list(p_utils.collect_presets()))
+def preset_name(request):
+    return request.param
+
+
+@pytest.fixture(scope="function")
+def csv_results():
+    # TODO: stil not in use - make it work
+    test_name = '__test_reward_{}'.format(preset_name)
+    test_path = os.path.join('./experiments', test_name)
+    if path.exists(test_path):
+        shutil.rmtree(test_path)
+
+    yield
+
 

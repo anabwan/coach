@@ -1,108 +1,38 @@
 #
-# Copyright (c) 2017 Intel Corporation
+# INTEL CONFIDENTIAL
+# Copyright 2017-2019 Intel Corporation.
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+# This software and the related documents are Intel copyrighted materials,
+# and your use of them is governed by the express license under which they
+# were provided to you (License). Unless the License provides otherwise, you
+# may not use, modify, copy, publish, distribute, disclose or transmit this
+# software or the related documents without Intel's prior written permission.
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-#
+# This software and the related documents are provided as is, with no express
+# or implied warranties, other than those that are expressly stated in the
+# License.
+"""Golden tests"""
 
 import argparse
-import glob
 import os
 import shutil
-import signal
 import subprocess
-import sys
-from importlib import import_module
-from os import path
-sys.path.append('.')
 import numpy as np
 import pandas as pd
 import time
 import pytest
-
-# -*- coding: utf-8 -*-
+import rl_coach.tests.utils.presets_utils as p_utils
+import rl_coach.tests.utils.test_utils as test_utils
 from rl_coach.logger import screen
-
-
-def read_csv_paths(test_path, filename_pattern, read_csv_tries=100):
-    csv_paths = []
-    tries_counter = 0
-    while not csv_paths:
-        csv_paths = glob.glob(path.join(test_path, '*', filename_pattern))
-        if tries_counter > read_csv_tries:
-            break
-        tries_counter += 1
-        time.sleep(1)
-    return csv_paths
-
-
-def print_progress(averaged_rewards, last_num_episodes, preset_validation_params, start_time, time_limit):
-    percentage = int((100 * last_num_episodes) / preset_validation_params.max_episodes_to_achieve_reward)
-    sys.stdout.write("\rReward: ({}/{})".format(round(averaged_rewards[-1], 1),
-                                                preset_validation_params.min_reward_threshold))
-    sys.stdout.write(' Time (sec): ({}/{})'.format(round(time.time() - start_time, 2), time_limit))
-    sys.stdout.write(' Episode: ({}/{})'.format(last_num_episodes,
-                                                preset_validation_params.max_episodes_to_achieve_reward))
-    sys.stdout.write(
-        ' {}%|{}{}|  '.format(percentage, '#' * int(percentage / 10), ' ' * (10 - int(percentage / 10))))
-    sys.stdout.flush()
-
-
-def import_preset(preset_name):
-    return import_module('rl_coach.presets.{}'.format(preset_name))
-
-
-def validation_params(preset_name):
-    return import_preset(preset_name).graph_manager.preset_validation_params
-
-
-def all_presets():
-    return [
-        f[:-3] for f in os.listdir(os.path.join('rl_coach', 'presets'))
-        if f[-3:] == '.py' and not f == '__init__.py'
-    ]
-
-
-def importable(preset_name):
-    try:
-        import_preset(preset_name)
-        return True
-    except BaseException:
-        return False
-
-
-def has_test_parameters(preset_name):
-    return bool(validation_params(preset_name).test)
-
-
-def collect_presets():
-    for preset_name in all_presets():
-        # if it isn't importable, still include it so we can fail the test
-        if not importable(preset_name):
-            yield preset_name
-        # otherwise, make sure it has test parameters before including it
-        elif has_test_parameters(preset_name):
-            yield preset_name
-
-
-@pytest.fixture(params=list(collect_presets()))
-def preset_name(request):
-    return request.param
+from os import path
 
 
 @pytest.mark.golden_test
-def test_preset_reward(preset_name, no_progress_bar=False, time_limit=60 * 60, verbose=False):
-    preset_validation_params = validation_params(preset_name)
+def test_preset_reward(preset_name, time_limit=60*60, progress_bar=False,
+                       verbose=False):
+    """tests presets reward"""
 
+    p_valid_params = p_utils.validation_params(preset_name)
     win_size = 10
 
     test_name = '__test_reward_{}'.format(preset_name)
@@ -112,18 +42,18 @@ def test_preset_reward(preset_name, no_progress_bar=False, time_limit=60 * 60, v
 
     # run the experiment in a separate thread
     screen.log_title("Running test {}".format(preset_name))
-    log_file_name = 'test_log_{preset_name}.txt'.format(preset_name=preset_name)
+    log_file_name = 'test_log_{}.txt'.format(preset_name)
     cmd = [
         'python3',
         'rl_coach/coach.py',
         '-p', '{preset_name}'.format(preset_name=preset_name),
         '-e', '{test_name}'.format(test_name=test_name),
-        '-n', '{num_workers}'.format(num_workers=preset_validation_params.num_workers),
+        '-n', '{num_workers}'.format(num_workers=p_valid_params.num_workers),
         '--seed', '0',
         '-c'
     ]
-    if preset_validation_params.reward_test_level:
-        cmd += ['-lvl', '{level}'.format(level=preset_validation_params.reward_test_level)]
+    if p_valid_params.reward_test_level:
+        cmd += ['-lvl', '{level}'.format(level=p_valid_params.reward_test_level)]
 
     stdout = open(log_file_name, 'w')
 
@@ -132,7 +62,7 @@ def test_preset_reward(preset_name, no_progress_bar=False, time_limit=60 * 60, v
     start_time = time.time()
 
     reward_str = 'Evaluation Reward'
-    if preset_validation_params.num_workers > 1:
+    if p_valid_params.num_workers > 1:
         filename_pattern = 'worker_0*.csv'
     else:
         filename_pattern = '*.csv'
@@ -140,7 +70,7 @@ def test_preset_reward(preset_name, no_progress_bar=False, time_limit=60 * 60, v
     test_passed = False
 
     # get the csv with the results
-    csv_paths = read_csv_paths(test_path, filename_pattern)
+    csv_paths = test_utils.read_csv_paths(test_path, filename_pattern)
 
     if csv_paths:
         csv_path = csv_paths[0]
@@ -152,11 +82,12 @@ def test_preset_reward(preset_name, no_progress_bar=False, time_limit=60 * 60, v
 
         last_num_episodes = 0
 
-        if not no_progress_bar:
-            print_progress(averaged_rewards, last_num_episodes, preset_validation_params, start_time, time_limit)
+        if not progress_bar:
+            test_utils.print_progress(averaged_rewards, last_num_episodes,
+                                      p_valid_params, start_time, time_limit)
 
-        while csv is None or (csv['Episode #'].values[
-                                  -1] < preset_validation_params.max_episodes_to_achieve_reward and time.time() - start_time < time_limit):
+        while csv is None or \
+                (csv['Episode #'].values[-1] < p_valid_params.max_episodes_to_achieve_reward and time.time() - start_time < time_limit):
             try:
                 csv = pd.read_csv(csv_path)
             except:
@@ -176,8 +107,10 @@ def test_preset_reward(preset_name, no_progress_bar=False, time_limit=60 * 60, v
                 time.sleep(1)
                 continue
 
-            if not no_progress_bar:
-                print_progress(averaged_rewards, last_num_episodes, preset_validation_params, start_time, time_limit)
+            if not progress_bar:
+                test_utils.print_progress(averaged_rewards, last_num_episodes,
+                                          p_valid_params, start_time,
+                                          time_limit)
 
             if csv['Episode #'].shape[0] - last_num_episodes <= 0:
                 continue
@@ -185,7 +118,7 @@ def test_preset_reward(preset_name, no_progress_bar=False, time_limit=60 * 60, v
             last_num_episodes = csv['Episode #'].values[-1]
 
             # check if reward is enough
-            if np.any(averaged_rewards >= preset_validation_params.min_reward_threshold):
+            if np.any(averaged_rewards >= p_valid_params.min_reward_threshold):
                 test_passed = True
                 break
             time.sleep(1)
@@ -208,9 +141,9 @@ def test_preset_reward(preset_name, no_progress_bar=False, time_limit=60 * 60, v
                 screen.error("command exitcode: {}".format(p.returncode), crash=False)
                 screen.error(open(log_file_name).read(), crash=False)
             screen.error("preset_validation_params.max_episodes_to_achieve_reward: {}".format(
-                preset_validation_params.max_episodes_to_achieve_reward), crash=False)
+                p_valid_params.max_episodes_to_achieve_reward), crash=False)
             screen.error("preset_validation_params.min_reward_threshold: {}".format(
-                preset_validation_params.min_reward_threshold), crash=False)
+                p_valid_params.min_reward_threshold), crash=False)
             screen.error("averaged_rewards: {}".format(averaged_rewards), crash=False)
             screen.error("episode number: {}".format(csv['Episode #'].values[-1]), crash=False)
         else:
@@ -252,7 +185,7 @@ def main():
     if args.preset is not None:
         presets_lists = args.preset.split(',')
     else:
-        presets_lists = all_presets()
+        presets_lists = p_utils.all_presets()
 
     fail_count = 0
     test_count = 0
@@ -268,25 +201,29 @@ def main():
             break
         if preset_name not in presets_to_ignore:
             print("Attempting to run Preset: %s" % preset_name)
-            if not importable(preset_name):
-                screen.error("Failed to load preset <{}>".format(preset_name), crash=False)
+            if not p_utils.importable(preset_name):
+                screen.error("Failed to load preset <{}>".format(preset_name),
+                             crash=False)
                 fail_count += 1
                 test_count += 1
                 continue
 
-            if not has_test_parameters(preset_name):
+            if not p_utils.has_test_parameters(preset_name):
                 continue
 
             test_count += 1
-            test_passed = test_preset_reward(preset_name, args.no_progress_bar, args.time_limit, args.verbose)
+            test_passed = test_preset_reward(preset_name, args.progress_bar,
+                                             args.time_limit, args.verbose)
             if not test_passed:
                 fail_count += 1
 
     screen.separator()
     if fail_count == 0:
-        screen.success(" Summary: " + str(test_count) + "/" + str(test_count) + " tests passed successfully")
+        screen.success(" Summary: " + str(test_count) + "/" + str(test_count)
+                       + " tests passed successfully")
     else:
-        screen.error(" Summary: " + str(test_count - fail_count) + "/" + str(test_count) + " tests passed successfully")
+        screen.error(" Summary: " + str(test_count - fail_count) + "/"
+                     + str(test_count) + " tests passed successfully")
 
 
 if __name__ == '__main__':
